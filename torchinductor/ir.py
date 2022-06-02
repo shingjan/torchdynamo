@@ -2180,13 +2180,13 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
-            def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+            def load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
                 index = add_index(index, "reads")
-                return self._inner.load(name, index, upcast)
+                return self._inner.load(name, index, upcast, store_cache_key)
 
-            def store(self, name, index, value):
+            def store(self, name, index, value, store_cache_key = None):
                 index = add_index(index, "writes")
-                return self._inner.store(name, index, value)
+                return self._inner.store(name, index, value, store_cache_key)
 
             def reduction(self, name, dtype, reduction_type, index, value):
                 index = add_index(index, "writes")

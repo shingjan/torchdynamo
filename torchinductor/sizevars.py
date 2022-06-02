@@ -9,6 +9,9 @@ from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from torchinductor.ir import ComputedBuffer
+
+from . import dependencies
 from .virtualized import V
 
 
@@ -326,17 +329,36 @@ class SimplifyIndexing(V.WrapperHandler):
     simplify ir.ModularIndexing/ir.IndexingDiv.
     """
 
-    def __init__(self, inner, var_ranges):
+    def __init__(self, inner, var_ranges, canonicalize_index: bool = False):
         super().__init__(inner)
         self._var_ranges = var_ranges
+        self._canonicalize_index = canonicalize_index
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.load(name, index, upcast)
+    def canonicalize(self, index):
+        if len(self._var_ranges) > 1:
+            # Try to further simplify the indexes even if previous simplify_loops
+            # didn't convert it to the simpliest form because of the interference
+            # from different indexing formulas.
+            index_vars = list(self._var_ranges.keys())
+            sizes = list(self._var_ranges.values())
+            new_sizes, reindex, prune = ComputedBuffer._simplify_loops(
+                index_vars, sizes, [index])
+            if len(new_sizes) < len(sizes):
+                replacement = dict(zip(index_vars, reindex(prune(index_vars))))
+                index = sympy.expand(index).subs(replacement).subs({index_vars[1]:index_vars[0]})
+        return index
 
-    def store(self, name, index, value):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.store(name, index, value)
+        if self._canonicalize_index:
+            store_cache_key = self.canonicalize(index)
+        return self._inner.load(name, index, upcast, store_cache_key)
+
+    def store(self, name, index, value, store_cache_key = None):
+        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
+        if self._canonicalize_index:
+            store_cache_key = self.canonicalize(index)
+        return self._inner.store(name, index, value, store_cache_key)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)

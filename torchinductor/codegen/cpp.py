@@ -203,13 +203,13 @@ class CppKernel(Kernel):
         self.reduction_suffix = IndentedBuffer()
         self.reduction_vars = {}
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
         # upcast argument is ignored on cpu
         var = self.args.input(name)
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, store_cache_key = None):
         assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)

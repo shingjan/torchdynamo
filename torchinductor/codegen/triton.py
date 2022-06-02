@@ -408,7 +408,7 @@ class TritonKernel(Kernel):
             yield mask
         self._load_mask = prior
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
         if (name, index) in self.disabled_reduction_stores:
             return self.disabled_reduction_stores[(name, index)]
         var = self.args.input(name)
@@ -418,7 +418,7 @@ class TritonKernel(Kernel):
             line += ".to(tl.float32)"
         return self.cse.generate(self.loads, line)
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, store_cache_key = None):
         var = self.args.output(name)
         index, mask = self.indexing(index, value)
         line = f"tl.store({var} + {index}, {value}, {mask})"

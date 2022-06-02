@@ -386,20 +386,20 @@ class Kernel(CodeGen):
         self.stores = stores
         self.cse = cse
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
         raise NotImplementedError()
 
-    def indirect_load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def indirect_load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
         """A load the depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
             self.loads = self.compute
-            return self.load(name, index, upcast)
+            return self.load(name, index, upcast, store_cache_key)
         finally:
             self.loads = prior
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, store_cache_key = None):
         raise NotImplementedError()
 
     def reduction(self, name, dtype, reduction_type, index, value):
@@ -421,22 +421,24 @@ class Kernel(CodeGen):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
-            def load(name: str, index: sympy.Expr, upcast: bool = False):
+            def load(name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
                 if "tmp" in str(index):
-                    return self.indirect_load(name, index, upcast)
+                    return self.indirect_load(name, index, upcast, store_cache_key)
                 store_cache = self.cse.store_cache
-                if (name, index) in store_cache:
-                    return store_cache[(name, index)]
-                if (name, self.rename_indexing(index)) in store_cache:
+                key = store_cache_key if store_cache_key else index
+                if (name, key) in store_cache:
+                    return store_cache[(name, key)]
+                key = self.rename_indexing(index)
+                if (name, key) in store_cache:
                     # TODO(jansel): figure out why we need this second case
-                    return store_cache[(name, self.rename_indexing(index))]
-                return self.load(name, index, upcast)
+                    return store_cache[(name, key)]
+                return self.load(name, index, upcast, store_cache_key)
 
             @staticmethod
-            def store(name, index, value):
-                self.cse.store_cache[(name, index)] = value
+            def store(name, index, value, store_cache_key = None):
+                self.cse.store_cache[(name, store_cache_key if store_cache_key else index)] = value
                 if name not in V.graph.removed_buffers:
-                    return self.store(name, index, value)
+                    return self.store(name, index, value, store_cache_key)
 
             @staticmethod
             def reduction(name, dtype, reduction_type, index, value):

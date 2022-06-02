@@ -24,7 +24,6 @@ class MemoryDep(typing.NamedTuple):
             return MemoryDep(renames[self.name], self.index, self.size)
         return self
 
-
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
@@ -70,11 +69,11 @@ class RecordLoadStore(V.MockHandler):
         self._index_exprs = set()
         self._size = tuple([x for x in size if x != 1])
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False, store_cache_key: sympy.Expr = None):
         self._reads.add(MemoryDep(name, index, self._size))
         return f"load({name}, {index}, {upcast})"
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, store_cache_key = None):
         self._writes.add(MemoryDep(name, index, self._size))
         return f"store({name}, {index}, {value})"
 
