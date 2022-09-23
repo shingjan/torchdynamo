@@ -973,8 +973,12 @@ class TIRKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
-        call_args = ", ".join(call_args)
-        code.writeline(f"{name}[grid({', '.join(grid)})]({call_args})")
+        call_args_nd = []
+        for i in range(3):
+            line = f"tmp{i} = tvm.nd.array({call_args[i]}.numpy())"
+            code.writeline(line)
+            call_args_nd.append(f"tmp{i}")
+        code.writeline(f"{name}({', '.join(call_args_nd)})")
 
 
 class TIRScheduling:
