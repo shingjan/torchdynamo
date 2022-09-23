@@ -344,6 +344,7 @@ class WrapperCodeGen(CodeGen):
                 result.writeline("return ()")
 
         self.add_benchmark_harness(result)
+        # print(result.getvalue())
 
         return result.getvalue()
 
