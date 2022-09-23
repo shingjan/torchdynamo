@@ -381,8 +381,59 @@ class KernelArgs:
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
 
-
 class CSE:
+    """Common subexpression elimination"""
+
+    def __init__(
+        self,
+        prefix="",
+        suffix="",
+        name_prefix="tmp",
+        iter_buffers=None,
+        store_cache=None,
+        reduction_cache=None,
+    ):
+        self.prefix = prefix
+        self.suffix = suffix
+        self.cache = {}
+        self.name_prefix = name_prefix
+        self.store_cache = store_cache or {}
+        self.reduction_cache = reduction_cache or {}
+        self.iter_buffer_ids = iter_buffers or itertools.count()
+        self.invalidated_stores = set()
+
+    def invalidate(self, keep_vars: typing.Set[str]):
+        for name, tmp in list(self.store_cache.items()):
+            if tmp not in keep_vars:
+                del self.store_cache[name]
+                self.invalidated_stores.add(name)
+        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+
+    def clone(self):
+        return CSE(
+            self.prefix,
+            self.suffix,
+            self.name_prefix,
+            self.iter_buffer_ids,
+            self.store_cache,
+        )
+
+    def generate(self, buffer: IndentedBuffer, expr: str, write=True):
+        assert isinstance(expr, str), expr
+        if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
+            return expr
+        if expr not in self.cache:
+            var = self.newvar()
+            self.cache[expr] = var
+            if write:
+                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
+                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
+        return self.cache[expr]
+
+    def newvar(self):
+        return f"{self.name_prefix}{next(self.iter_buffer_ids)}"
+
+class TIRCSE:
     """Common subexpression elimination"""
 
     def __init__(
@@ -429,6 +480,14 @@ class CSE:
             V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
             if expr.startswith("T.alloc_buffer("):
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
+            elif expr.startswith("tmp1"):
+                updated = f"""
+        for i0 in T.serial(10):
+            with T.block("T_add"):
+                ax0 = T.axis.spatial(10, i0)
+                out_ptr0[ax0] = tmp0[ax0] + tmp2[ax0]
+                """
+                buffer.splice(updated)
             else:
                 buffer.writeline(f"{expr}{self.suffix}")
         # print(buffer.getvalue())

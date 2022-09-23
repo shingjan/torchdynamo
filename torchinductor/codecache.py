@@ -188,5 +188,14 @@ def patch_tir_dir():
 class TIRCodeCache:
     @classmethod
     def load(cls, source_code):
-        patch_tir_dir()
-        return PyCodeCache.load(source_code)
+        patch_triton_dir()
+        key, path = write(source_code, "py")
+        if key not in cls.cache:
+            with open(path) as f:
+                code = compile(f.read(), path, "exec")
+                mod = types.ModuleType(f"{__name__}.{key}")
+                mod.__file__ = path
+                exec(code, mod.__dict__, mod.__dict__)
+                cls.cache[key] = mod
+                cls.cache[key].key = key
+        return cls.cache[key]

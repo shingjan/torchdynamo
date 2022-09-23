@@ -28,6 +28,7 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+from .common import TIRCSE
 from .common import index_prevent_reordering
 
 log = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ dtype_map = {
     torch.bool : "bool",
 }
 
-def triton_compute_type(dtype):
+def tir_compute_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
         triton_type_name = "int1"
@@ -75,7 +76,7 @@ def triton_compute_type(dtype):
     return f"T.{triton_type_name}"
 
 
-def triton_constant(value):
+def tir_constant(value):
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -92,11 +93,11 @@ class TIROverrides(OpOverrides):
     def to_dtype(x, dtype: torch.dtype):
         if dtype == torch.bool:
             return f"({x} != 0)"
-        return f"{x}.to({triton_compute_type(dtype)})"
+        return f"{x}.to({tir_compute_type(dtype)})"
 
     @staticmethod
     def constant(value, dtype):
-        return triton_constant(value)
+        return tir_constant(value)
 
     @staticmethod
     def abs(x):
@@ -403,6 +404,8 @@ class IterationRangesRoot(IterationRanges):
 
     def codegen_header(self, code):
         header = """
+        # function attr dict
+        T.func_attr({"global_symbol": "main", "tir.noalias": True})
         # body
         # with T.block(\"root\")
         """
@@ -442,7 +445,7 @@ class IterationRangesEntry(IterationRanges):
             V.kernel.body.writeline(line)
 
     def _codegen(self):
-        self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
+        #self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
     def symbol(self):
@@ -461,6 +464,7 @@ class TIRKernel(Kernel):
 
     def __init__(self, *groups, pid_cache={}, reduction_hint=ReductionHint.DEFAULT):
         super(TIRKernel, self).__init__()
+        self.cse = TIRCSE(self.newvar_prefix, self.suffix)
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
         self.range_tree_nodes = {}
@@ -742,7 +746,7 @@ class TIRKernel(Kernel):
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
 
-        line = f"T.alloc_buffer([10], dtype={dtype_map[V.graph.get_dtype(name)]})"
+        line = f"T.alloc_buffer([10], dtype=\"{dtype_map[V.graph.get_dtype(name)]}\")"
         if (
             self.inside_reduction
             and "rmask" not in mask
@@ -763,7 +767,7 @@ class TIRKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
-            line = f"T.store({var} + {index}, {value}, {mask})"
+            line = ""#f"T.store({var} + {index}, {value}, {mask})"
         elif mode == "atomic_add":
             line = f"T.atomic_add({var} + {index}, {value}, {mask})"
         else:
@@ -774,7 +778,7 @@ class TIRKernel(Kernel):
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
+        default = tir_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
@@ -793,7 +797,7 @@ class TIRKernel(Kernel):
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = T.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}) + {default}"
+                f"{accumulator} = T.zeros({self.dense_size_str()}, {tir_compute_type(src_dtype)}) + {default}"
             )
             accumulator_index = None
             if reduction_type in {"argmax", "argmin"}:
@@ -918,7 +922,7 @@ class TIRKernel(Kernel):
         argdefs, _ = self.args.python_argdefs()
 
         with code.indent():
-            def_line = f"def {name or '{kernel_name}'}("
+            def_line = f"def main("
             def_line += ', '.join(s + ": T.Buffer[10, \"float32\"]" for s in argdefs)
             def_line += ") -> None:"
             code.writeline(def_line)
@@ -932,9 +936,9 @@ class TIRKernel(Kernel):
             return code.getvalue()
 
         wrapper = IndentedBuffer()
-        wrapper.writeline("tvm.script.from_source('''")
+        wrapper.writeline("tvm.build(tvm.script.from_source('''")
         wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("''').{kernel_name}")
+        wrapper.writeline("'''), target=\"llvm\")")
         print("-------TIR printout-------\n")
         print(wrapper.getvalue())
         print("-------TIR printout-------\n")
@@ -1142,7 +1146,9 @@ class TIRScheduling:
                 elif node is EnableReduction:
                     stack.close()
                 else:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    tmp = kernel.split_and_set_ranges(node.get_ranges())
+                    node.codegen(tmp)
+                
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
@@ -1152,10 +1158,7 @@ class TIRScheduling:
             kernel_name = wrapper.next_kernel_name()
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
-            src_code = src_code.format(kernel_name=subs_name)
-            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-            src_code = src_code.replace("#pragma CMT", "#")
+            # src_code = src_code.format(kernel_name=subs_name)
             wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
