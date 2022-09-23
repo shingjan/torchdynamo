@@ -11,7 +11,7 @@ from torchdynamo.utils import dynamo_timed
 from .. import codecache
 from .. import config
 from .. import ir
-from ..utils import has_triton
+from ..utils import has_triton, has_tvm
 from ..utils import sympy_dot
 from ..utils import sympy_product
 from ..virtualized import V
@@ -227,6 +227,15 @@ class WrapperCodeGen(CodeGen):
                 self.header.writeline(
                     "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
+        
+        if has_tvm():
+            self.header.splice(
+                """
+                import tvm
+                from tvm import tir
+                from tvm.script import tir as T
+                """
+            )
 
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]

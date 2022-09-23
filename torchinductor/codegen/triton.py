@@ -961,6 +961,9 @@ class TritonKernel(Kernel):
         wrapper.writeline("TritonCodeCache.load('''")
         wrapper.splice(code.getvalue(), strip=True)
         wrapper.writeline("''').{kernel_name}")
+        # print("-------Triton printout-------\n")
+        # print(wrapper.getvalue())
+        # print("-------Triton printout-------\n")
         return wrapper.getvalue()
 
     def reshape_size_str(self, i=None, x=None):

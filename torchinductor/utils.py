@@ -24,6 +24,15 @@ def has_triton():
     except (ImportError, ModuleNotFoundError):
         return False
 
+@functools.lru_cache(None)
+def has_tvm():
+    try:
+        import tvm
+
+        return tvm is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
 
 @functools.lru_cache(None)
 def has_torchvision_roi_align():

@@ -423,12 +423,15 @@ class CSE:
         assert isinstance(expr, str), expr
         if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
             return expr
-        if expr not in self.cache:
-            var = self.newvar()
-            self.cache[expr] = var
-            if write:
-                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
+        var = self.newvar()
+        self.cache[expr] = var
+        if write:
+            V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
+            if expr.startswith("T.alloc_buffer("):
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
+            else:
+                buffer.writeline(f"{expr}{self.suffix}")
+        # print(buffer.getvalue())
         return self.cache[expr]
 
     def newvar(self):

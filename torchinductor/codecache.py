@@ -178,3 +178,15 @@ class TritonCodeCache:
     def load(cls, source_code):
         patch_triton_dir()
         return PyCodeCache.load(source_code)
+
+@functools.lru_cache(None)
+def patch_tir_dir():
+    os.environ["TIR_CACHE_DIR"] = os.environ.get(
+        "TIR_CACHE_DIR", os.path.join(cache_dir(), "TIR")
+    )
+
+class TIRCodeCache:
+    @classmethod
+    def load(cls, source_code):
+        patch_tir_dir()
+        return PyCodeCache.load(source_code)
