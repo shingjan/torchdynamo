@@ -18,7 +18,6 @@ from .. import config
 from .. import ir
 from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
-from ..utils import has_triton_libdevice
 from ..utils import sympy_product
 from ..utils import sympy_subs
 from ..virtualized import V
@@ -54,26 +53,27 @@ class TIRPrinter(ExprPrinter):
 texpr = TIRPrinter().doprint
 
 dtype_map = {
-    torch.float64 : "float64",
-    torch.float32 : "float32",
-    torch.float16 : "float16",
-    torch.bfloat16 : "bfloat16",
-    torch.int64 : "int64",
-    torch.int32 : "int32",
-    torch.int16 : "int16",
-    torch.int8 : "int8",
-    torch.uint8 : "uint8",
-    torch.bool : "bool",
+    torch.float64: "float64",
+    torch.float32: "float32",
+    torch.float16: "float16",
+    torch.bfloat16: "bfloat16",
+    torch.int64: "int64",
+    torch.int32: "int32",
+    torch.int16: "int16",
+    torch.int8: "int8",
+    torch.uint8: "uint8",
+    torch.bool: "bool",
 }
 
+
 def tir_compute_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int1"
-    if triton_type_name in ("float16", "bfloat16"):
+    tir_type_name = str(dtype).split(".")[-1]
+    if tir_type_name == "bool":
+        tir_type_name = "int1"
+    if tir_type_name in ("float16", "bfloat16"):
         # float16 math is done in float32 inside the kernel
-        triton_type_name = "float32"
-    return f"T.{triton_type_name}"
+        tir_type_name = "float32"
+    return f"T.{tir_type_name}"
 
 
 def tir_constant(value):
@@ -164,9 +164,7 @@ class TIROverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(
-            new_mask, result, TIROverrides.constant(other, torch.float32)
-        )
+        return ops.where(new_mask, result, TIROverrides.constant(other, torch.float32))
 
     @staticmethod
     def logical_and(a, b):
@@ -203,40 +201,23 @@ class TIROverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        if has_triton_libdevice():
-            return f"T.libdevice.log({x}) if {x}.dtype is T.float64 else T.log({x})"
-        else:
-            # workaround https://github.com/openai/triton/issues/543
-            return f"T.log({x}.to(T.float32))"
+        return f"T.log({x}.to(T.float32))"
 
     @staticmethod
     def isinf(x):
-        if has_triton_libdevice():
-            return f"T.libdevice.isinfd({x}) if {x}.dtype is T.float64 else T.libdevice.isinff({x})"
-        else:
-            return f"{x}+1 == {x}"
+        return f"{x}+1 == {x}"
 
     @staticmethod
     def isnan(x):
-        if has_triton_libdevice():
-            return f"T.libdevice.isnand({x}) if {x}.dtype is T.float64 else T.libdevice.isnanf({x})"
-        else:
-            return f"{x} != {x}"
+        return f"{x} != {x}"
 
     @staticmethod
     def round(x):
-        if has_triton_libdevice():
-            return f"T.libdevice.nearbyint({x})"
-        else:
-            return f"T.where({x}<0, {x}-0.5, {x}+0.5).to(T.int32).to(T.float32)"
+        return f"T.where({x}<0, {x}-0.5, {x}+0.5).to(T.int32).to(T.float32)"
 
     @staticmethod
     def floor(x):
-        if has_triton_libdevice():
-            return f"T.libdevice.floor({x})"
-        else:
-            tmp = ops.trunc(x)
-            return f"T.where({tmp}>{x}, {tmp}-1, {tmp})"
+        return f"T.where({tmp}>{x}, {tmp}-1, {tmp})"
 
     @staticmethod
     def floordiv(a, b):
@@ -249,10 +230,7 @@ class TIROverrides(OpOverrides):
 
     @staticmethod
     def trunc(x):
-        if has_triton_libdevice():
-            return f"T.libdevice.trunc({x})"
-        else:
-            return f"{x}.to(T.int32).to(T.float32)"
+        return f"{x}.to(T.int32).to(T.float32)"
 
     @staticmethod
     def truncdiv(a, b):
@@ -445,7 +423,7 @@ class IterationRangesEntry(IterationRanges):
             V.kernel.body.writeline(line)
 
     def _codegen(self):
-        #self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
+        # self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
     def symbol(self):
@@ -746,7 +724,7 @@ class TIRKernel(Kernel):
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
 
-        line = f"T.alloc_buffer([10], dtype=\"{dtype_map[V.graph.get_dtype(name)]}\")"
+        line = f'T.alloc_buffer([10], dtype="{dtype_map[V.graph.get_dtype(name)]}")'
         if (
             self.inside_reduction
             and "rmask" not in mask
@@ -767,7 +745,7 @@ class TIRKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
-            line = ""#f"T.store({var} + {index}, {value}, {mask})"
+            line = ""  # f"T.store({var} + {index}, {value}, {mask})"
         elif mode == "atomic_add":
             line = f"T.atomic_add({var} + {index}, {value}, {mask})"
         else:
@@ -923,7 +901,7 @@ class TIRKernel(Kernel):
 
         with code.indent():
             def_line = f"def main("
-            def_line += ', '.join(s + ": T.Buffer[10, \"float32\"]" for s in argdefs)
+            def_line += ", ".join(s + ': T.Buffer[10, "float32"]' for s in argdefs)
             def_line += ") -> None:"
             code.writeline(def_line)
             self.codegen_body()
@@ -1153,7 +1131,6 @@ class TIRScheduling:
                 else:
                     tmp = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(tmp)
-                
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
