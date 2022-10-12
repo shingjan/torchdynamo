@@ -381,6 +381,7 @@ class KernelArgs:
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
 
+
 class CSE:
     """Common subexpression elimination"""
 
@@ -433,6 +434,7 @@ class CSE:
     def newvar(self):
         return f"{self.name_prefix}{next(self.iter_buffer_ids)}"
 
+
 class TIRCSE:
     """Common subexpression elimination"""
 
@@ -462,7 +464,7 @@ class TIRCSE:
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
-        return CSE(
+        return TIRCSE(
             self.prefix,
             self.suffix,
             self.name_prefix,

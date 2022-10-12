@@ -186,7 +186,7 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 import random
                 from torch import empty_strided, as_strided, device
-                from {codecache.__name__} import CppCodeCache, TritonCodeCache
+                from {codecache.__name__} import CppCodeCache, TritonCodeCache, TIRCodeCache
 
                 aten = torch.ops.aten
 
@@ -227,7 +227,7 @@ class WrapperCodeGen(CodeGen):
                 self.header.writeline(
                     "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
-        
+
         if has_tvm():
             self.header.splice(
                 """

@@ -886,7 +886,8 @@ class TIRKernel(Kernel):
         if name is None:
             code.splice(
                 f"""
-                    # from tvm.script import tir as T
+                    import tvm
+                    from tvm.script import tir as T
                 """
             )
 
@@ -914,9 +915,10 @@ class TIRKernel(Kernel):
             return code.getvalue()
 
         wrapper = IndentedBuffer()
-        wrapper.writeline("tvm.build(tvm.script.from_source('''")
+        wrapper.writeline("TIRCodeCache.load('''")
         wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("'''), target=\"llvm\")")
+        wrapper.writeline('mod = tvm.build(Module, target="llvm")')
+        wrapper.writeline("''').mod")
         print("-------TIR printout-------\n")
         print(wrapper.getvalue())
         print("-------TIR printout-------\n")
