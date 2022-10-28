@@ -99,24 +99,31 @@ extern "C" void kernel(const float* __restrict__ in_ptr0,
 # kernel generation
 cpp_kernel = CppCodeCache.load(cpp_str).kernel
 tvm_kernel = tvm.build(Module, target="llvm --num-cores=16")
-inp0 = torch.rand(802816)
-inp1 = torch.rand(802816)
-out0 = torch.rand(802816)
+tuned_tvm_kernel = tvm.build(Module_tuned, "llvm --num-cores=16")
 
 # input definition and kernel execution
+inp0 = torch.rand(802816)
+inp1 = torch.rand(802816)
+out0 = torch.zeros(802816)
 inp0_tvm = tvm.nd.array(inp0.numpy())
-inp1_tvm = tvm.nd.array(inp0.numpy())
-out0_tvm = tvm.nd.array(inp0.numpy())
-tvm_kernel(inp0_tvm, inp1_tvm, out0_tvm)
+inp1_tvm = tvm.nd.array(inp1.numpy())
+out0_tvm = tvm.nd.array(out0.numpy())
+
 
 # correctness check
 cpp_kernel(
     c_void_p(inp0.data_ptr()), c_void_p(inp1.data_ptr()), c_void_p(out0.data_ptr())
 )
-torch.allclose(torch.from_numpy(out0_tvm.numpy()), out0)
+tvm_kernel(inp0_tvm, inp1_tvm, out0_tvm)
+if torch.allclose(torch.from_numpy(out0_tvm.numpy()), out0):
+    print("Inductor-tir result is correct!")
+# clear out the output from last run
+out0_tvm = tvm.nd.array(torch.zeros(802816).numpy())
+tuned_tvm_kernel(inp0_tvm, inp1_tvm, out0_tvm)
+if torch.allclose(out0, torch.from_numpy(out0_tvm.numpy())):
+    print("Tuned Inductor-tir result is correct!")
 
 # inference perf
-print("result is correct!")
 print("Inductor TIR codegen perf:")
 print_performance(tvm_kernel, (inp0_tvm, inp1_tvm, out0_tvm))
 print("Inductor CPP/OpenMP codegen perf:")
@@ -124,31 +131,29 @@ print_performance(
     cpp_kernel,
     (c_void_p(inp0.data_ptr()), c_void_p(inp1.data_ptr()), c_void_p(out0.data_ptr())),
 )
-
-## tune perf
-with tempfile.TemporaryDirectory() as work_dir:
-    target = Target("llvm --num-cores=16")
-    # database = ms.tir_integration.tune_tir(
-    #     mod=Module_manual_rewrite,
-    #     target=target,
-    #     work_dir=work_dir,
-    #     max_trials_global=64,
-    #     num_trials_per_iter=64,
-    # )
-    # sch = ms.tir_integration.compile_tir(database, Module_manual_rewrite, target)
-    # print(sch.mod.script())
-    print("handwritten TIR codegen perf:")
-    rt_mod = tvm.build(Module_manual_rewrite, target)
-
-    inp0 = torch.rand(8, 16, 28, 28, 8)
-    print_performance(
-        rt_mod,
-        (
-            tvm.nd.array(inp0.numpy()),
-            tvm.nd.array(inp0.numpy()),
-            tvm.nd.array(inp0.numpy()),
-        ),
-    )
 print("Meta schedule tuned TIR codegen perf:")
-rt_mod = tvm.build(Module_tuned, "llvm --num-cores=32")
-print_performance(rt_mod, (inp0_tvm, inp1_tvm, out0_tvm))
+print_performance(tuned_tvm_kernel, (inp0_tvm, inp1_tvm, out0_tvm))
+## tune perf
+# with tempfile.TemporaryDirectory() as work_dir:
+#     target = Target("llvm --num-cores=16")
+# database = ms.tir_integration.tune_tir(
+#     mod=Module_manual_rewrite,
+#     target=target,
+#     work_dir=work_dir,
+#     max_trials_global=64,
+#     num_trials_per_iter=64,
+# )
+# sch = ms.tir_integration.compile_tir(database, Module_manual_rewrite, target)
+# print(sch.mod.script())
+# print("handwritten TIR codegen perf:")
+# rt_mod = tvm.build(Module_manual_rewrite, target)
+
+# inp0 = torch.rand(8, 16, 28, 28, 8)
+# print_performance(
+#     rt_mod,
+#     (
+#         tvm.nd.array(inp0.numpy()),
+#         tvm.nd.array(inp0.numpy()),
+#         tvm.nd.array(inp0.numpy()),
+#     ),
+# )
