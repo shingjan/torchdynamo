@@ -24,6 +24,7 @@ def has_triton():
     except (ImportError, ModuleNotFoundError):
         return False
 
+
 @functools.lru_cache(None)
 def has_tvm():
     try:
@@ -110,7 +111,7 @@ def timed(model, example_inputs, times=1):
         synchronize()
     t1 = time.perf_counter()
     # GC the result after timing
-    assert result is not None
+    # assert result is not None
     return t1 - t0
 
 

@@ -1049,7 +1049,7 @@ class Scheduler:
 
             # return CppScheduling(self)
             from .codegen.tvm import TIRScheduling
-            
+
             return TIRScheduling(self)
         else:
             from .codegen.triton import TritonScheduling

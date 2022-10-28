@@ -101,6 +101,12 @@ class triton:
     ordered_kernel_names = False
 
 
+# config specific to codegen/tvm.py
+class tir:
+    # should we give different names to kernels
+    ordered_kernel_names = False
+
+
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
