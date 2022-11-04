@@ -74,7 +74,7 @@ class triton:
     cudagraphs = True
 
     # choose conv backend, "aten" or "triton" or "autotune"
-    convolution = "aten"
+    convolution = "triton"
 
     # choose mm backend, "aten" or "triton" or "autotune"
     mm = "aten"
@@ -102,9 +102,13 @@ class triton:
 
 
 # config specific to codegen/tvm.py
-class tir:
+class tvm:
     # should we give different names to kernels
     ordered_kernel_names = False
+    # choose conv backend, "aten" or "tvm"
+    convolution = "tvm"
+    # choose mm backend, "aten" or "tvm"
+    mm = "aten"
 
 
 # create a directory containing lots of debug information

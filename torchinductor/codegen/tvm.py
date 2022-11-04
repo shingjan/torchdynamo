@@ -406,17 +406,11 @@ class TIRScheduling:
 
     @staticmethod
     def can_fuse_horizontal(node1, node2):
-        _, (vars1, reduce1) = node1.group
-        _, (vars2, reduce2) = node2.group
-        if vars1 == vars2 and reduce1 == reduce2:
-            return True
-        if reduce1 == () and vars1 == vars2 + reduce2:
-            return True
         return False
 
     @classmethod
     def can_fuse_vertical(cls, node1, node2):
-        return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
+        return False
 
     def codegen_nodes(self, nodes):
         """
@@ -427,8 +421,8 @@ class TIRScheduling:
             nodes, key=lambda x: int(x.is_reduction())
         ).group
         in_suffix = False
-        # for node in nodes:
-        #     print(node.debug_str_extra())
+        for node in nodes:
+            print(node.debug_str_extra())
 
         with TIRKernel() as kernel:
             vars, reduction_vars = kernel.set_ranges([group], ())
@@ -457,7 +451,7 @@ class TIRScheduling:
         else:
             kernel_name = wrapper.next_kernel_name()
             wrapper.kernels[src_code] = kernel_name
-            subs_name = kernel_name if config.tir.ordered_kernel_names else "kernel"
+            subs_name = kernel_name if config.tvm.ordered_kernel_names else "kernel"
             # src_code = src_code.format(kernel_name=subs_name)
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
