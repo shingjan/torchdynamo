@@ -3,7 +3,8 @@ from tvm import relay
 from tvm.script import tir as T
 from tvm.relay import expr as _expr
 from tvm.relay import op as _op
-from tvm.contrib import graph_runtime
+from tvm.contrib import graph_executor
+from tvm import meta_schedule as ms
 
 import torch
 
@@ -106,8 +107,8 @@ class Module:
 class _conv:
     @staticmethod
     def convolution(
-        x,
-        w,
+        x_shape,
+        w_shape,
         bias,
         stride,
         padding,
@@ -119,13 +120,13 @@ class _conv:
         # Use transpose or normal
         use_transpose = transposed
 
-        data = relay.var("data", shape=x.shape)
-        weight = relay.var("weight", shape=w.shape)
+        data = relay.var("data", shape=x_shape)
+        weight = relay.var("weight", shape=w_shape)
         strides = tuple(stride)
         padding = tuple(padding)
         dilation = tuple(dilation)
         groups = int(groups)
-        weight_shape = w.shape
+        weight_shape = w_shape
 
         if use_transpose:
             channels = weight_shape[1] * groups
@@ -234,33 +235,59 @@ class _conv:
         output_padding,
         groups,
     ):
-        x_tvm = tvm.nd.array(x.numpy())
-        w_tvm = tvm.nd.array(w.numpy())
-        out_tvm = tvm.nd.array(
-            torch.zeros((8, 64, 112, 112), device="cpu", dtype=torch.float32)
-        )
         relay_func = _conv.convolution(
-            x, w, bias, stride, padding, dilation, transposed, output_padding, groups
+            x.shape,
+            w.shape,
+            bias,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
         )
-        print(relay_func)
         mod = tvm.IRModule.from_expr(relay_func)
-        with relay.build_config(opt_level=3):
-            graph, lib, params = relay.build_module.build(
-                mod, tvm.target.Target("llvm --num-cores=16"), params={}
-            )
+        target = tvm.target.Target("llvm --num-cores=16")
+        lib = _conv.tune_with_tvm(mod, target, {})
+        print(relay_func)
         ctx = tvm.cpu()
-        module = graph_runtime.create(graph, lib, ctx)
-        module.set_input("data", x.numpy())
-        module.set_input("weight", w.numpy())
-        module.run()
-        out = module.get_output(0, tvm.nd.empty((8, 64, 112, 112))).asnumpy()
-        # kernel = tvm.build(Module, target="llvm --num-cores=16")
-        # kernel(
-        #     w_tvm,
-        #     x_tvm,
-        #     out_tvm,
-        # )
-        return torch.from_numpy(out)
+        m = graph_executor.GraphModule(lib["default"](ctx))
+        m.set_input("data", tvm.nd.from_dlpack(x.detach().contiguous()))
+        m.set_input("weight", tvm.nd.from_dlpack(w.detach().contiguous()))
+        m.run()
+        return torch.from_dlpack(m.get_output(0))
+
+    @staticmethod
+    def tune_with_tvm(mod, target, params):
+        import tempfile
+
+        tasks = ms.relay_integration.extract_tasks(mod, target, params)
+        for tsk in tasks:
+            print(tsk.dispatched[0].script())
+        return _conv.tune_with_relay(mod, target, params)
+        with tempfile.TemporaryDirectory() as work_dir:
+            database = ms.relay_integration.tune_relay(
+                mod=mod,
+                target=tvm.target.Target("llvm --num-cores=12"),
+                work_dir=work_dir,
+                max_trials_global=20000,
+                num_trials_per_iter=64,
+                params=params,
+                strategy="evolutionary",
+            )
+            lib = ms.relay_integration.compile_relay(
+                database=database,
+                mod=mod,
+                target=tvm.target.Target("llvm --num-cores=12"),
+                params=params,
+            )
+        return lib
+
+    @staticmethod
+    def tune_with_relay(mod, target, params):
+        with tvm.transform.PassContext(opt_level=10):
+            lib = relay.build(mod, target=target, params=params)
+        return lib
 
     @staticmethod
     def forward(
